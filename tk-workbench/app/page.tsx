@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 type ModuleKey = "dashboard" | "alerts" | "logistics" | "service" | "ads" | "video" | "selection" | "testing" | "inventory" | "creators" | "links" | "profit" | "settings";
-type VideoStageKey = "00" | "01" | "02" | "03" | "04" | "05" | "06";
+type VideoStageKey = "00" | "01" | "02" | "03" | "04" | "05" | "06" | "07";
 type WorkbenchHistoryState = { tkWorkbench: true; index: number; module: ModuleKey; stage: VideoStageKey; view: string };
 type DataRow = Record<string, unknown>;
 type StoreData = {
@@ -49,11 +49,12 @@ const videoStages: Array<{ key: VideoStageKey; label: string }> = [
   { key: "04", label: "脚本与分镜" },
   { key: "05", label: "视频生产与发布" },
   { key: "06", label: "数据复盘" },
+  { key: "07", label: "爆款素材库" },
 ];
 
 const moduleKeys = new Set<ModuleKey>(navigation.map(item => item.key));
 const videoStageKeys = new Set<VideoStageKey>(videoStages.map(item => item.key));
-const defaultVideoView = (stage: VideoStageKey) => stage === "04" ? "script:inputs" : stage === "05" ? "production:reference" : stage === "06" ? "review:overview" : "";
+const defaultVideoView = (stage: VideoStageKey) => stage === "04" ? "script:inputs" : stage === "05" ? "production:reference" : stage === "06" ? "review:overview" : stage === "07" ? "library:all" : "";
 const readWorkbenchLocation = () => {
   if (typeof window === "undefined") return { module: "dashboard" as ModuleKey, stage: "00" as VideoStageKey, view: "" };
   const url = new URL(window.location.href);
@@ -72,6 +73,7 @@ const videoStageMeta: Record<VideoStageKey, { eyebrow: string; title: string; de
   "04": { eyebrow: "创意策划", title: "脚本与分镜", description: "锁定脚本后拆成镜头，决定每个镜头使用 AI、实拍或混合制作，并建立产品与人物锚点。", owner: "内容 Agent" },
   "05": { eyebrow: "资产生产", title: "视频生产与发布", description: "逐镜头生成画面提示词、参考图和视频提示词，完成 AI 视频创作后进入发布。", owner: "内容制作" },
   "06": { eyebrow: "经营闭环", title: "数据复盘", description: "把播放、留存、点击、订单、GMV 和利润回写到脚本、镜头和商品，决定下一轮动作。", owner: "老板 / Agent" },
+  "07": { eyebrow: "内部选题资产", title: "爆款素材库", description: "手机发现后写入飞书的原视频，在这里按平台、类目和钩子筛选；不虚构播放或销量，缺失字段明确显示待补齐。", owner: "运营 / 内容团队" },
 };
 
 const contentProjects = [
@@ -731,6 +733,7 @@ type ViralPoolRecord = {
   comments: number; favorites: number; shares: number; status: string; analysis: string;
   score: number | null; hook: string; hookType: string; link: string; embedUrl: string;
   localPreview?: boolean;
+  category?: string; sourceGroup?: string; sourceStatus?: string; sourceHook?: string;
 };
 
 const viralPoolRecords: ViralPoolRecord[] = [
@@ -1089,6 +1092,49 @@ function ProductResearchResult({ job, country, platform, language, onConfirm, on
   return <section className="research-project-page"><header className="research-project-header"><div><p className="eyebrow">商品调研项目 · {job.id.slice(-8).toUpperCase()}</p><h2>{String(result.title || "商品调研完整方案")}</h2><div className="research-scope-chips"><span>{country}</span><span>{platform}</span><span>营销文案：{language}</span><span>分析报告：中文</span><span>V1 调研版</span></div></div><div className="research-project-tools"><span className="approved-pill">调研已完成</span><button className="secondary-button" onClick={onRerun}>按新规则重跑</button><button className="secondary-button" onClick={()=>window.print()}>导出方案</button></div></header><div className="research-project-layout"><aside className="research-result-nav"><div><small>方案目录</small><strong>8 个审核栏目</strong></div>{productResearchTabs.map(item=><button className={activeTab===item.key?"active":""} key={item.key} onClick={()=>setActiveTab(item.key)}><span>{item.icon}</span><div><b>{item.number} · {item.label}</b><small>{item.note}</small></div><i>›</i></button>)}</aside><main className="research-result-canvas"><div className="research-canvas-title"><div><small>{activeMeta.number} / 08</small><h3>{activeMeta.label}</h3></div><span>{activeMeta.note}</span></div>{renderContent()}</main></div><footer className="research-project-footer"><div><small>当前方案已保存到工作台</small><strong>请逐项审核，确认后再进入脚本与分镜</strong></div><div><button className="secondary-button" onClick={onNew}>新建商品调研</button><button className="primary-button" onClick={onConfirm}>确认方案，进入脚本与分镜 →</button></div></footer></section>;
 }
 
+function ViralMaterialLibrary({ records, syncState, syncedAt, onRefresh, onPreview, onChoose }: { records: ViralPoolRecord[]; syncState: string; syncedAt: string | null; onRefresh: () => void; onPreview: (record: ViralPoolRecord) => void; onChoose: (id: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [platform, setPlatform] = useState("全部平台");
+  const [hook, setHook] = useState("全部钩子");
+  const [category, setCategory] = useState("全部类目");
+  const [notice, setNotice] = useState("");
+  const values = (items: string[]) => Array.from(new Set(items.filter(Boolean))).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const categories = values(records.map(item => item.category || "待分类"));
+  const hooks = values(records.map(item => item.hookType || "待识别"));
+  const visible = records.filter(item => {
+    const searchable = `${item.title} ${item.author} ${item.id} ${item.sourceHook || ""}`.toLocaleLowerCase();
+    return (platform === "全部平台" || item.platform === platform)
+      && (category === "全部类目" || (item.category || "待分类") === category)
+      && (hook === "全部钩子" || (item.hookType || "待识别") === hook)
+      && (!query.trim() || searchable.includes(query.trim().toLocaleLowerCase()));
+  });
+  const format = (value: number | null) => value === null ? "待补齐" : value >= 10000 ? `${(value / 10000).toFixed(1)}万` : value.toLocaleString("zh-CN");
+  return <section className="viral-library-shell">
+    <div className="viral-library-intro">
+      <div><p>飞书人工发现 · 方法 3</p><h2>爆款素材库</h2><span>已按 <b>平台 + 视频 ID</b> 去重。点开“预览原片”查看 TikTok / 抖音原视频；点“进入拆解”将该素材带入下一步。</span></div>
+      <div className="viral-library-actions"><span className={syncState === "live" ? "library-live" : "library-muted"}>{syncState === "live" ? "飞书已连接" : "使用最近快照"}</span><button className="secondary-button" onClick={onRefresh}>↻ 同步飞书</button></div>
+    </div>
+    <div className="library-stat-strip"><span><b>{records.length}</b> 条唯一素材</span><span><b>{records.filter(item => item.platform === "TikTok").length}</b> 条 TikTok</span><span><b>{records.filter(item => item.platform === "抖音").length}</b> 条 抖音</span><span>最近同步 {syncedAt ? new Date(syncedAt).toLocaleString("zh-CN") : "等待读取"}</span></div>
+    <div className="library-filterbar">
+      <label className="library-search"><span>⌕</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索标题、作者、视频 ID、钩子" /></label>
+      <select aria-label="平台筛选" value={platform} onChange={event => setPlatform(event.target.value)}><option>全部平台</option><option>TikTok</option><option>抖音</option></select>
+      <select aria-label="类目筛选" value={category} onChange={event => setCategory(event.target.value)}><option>全部类目</option>{categories.map(item => <option key={item}>{item}</option>)}</select>
+      <select aria-label="钩子筛选" value={hook} onChange={event => setHook(event.target.value)}><option>全部钩子</option>{hooks.map(item => <option key={item}>{item}</option>)}</select>
+      <button className="filter-reset" onClick={() => { setQuery(""); setPlatform("全部平台"); setCategory("全部类目"); setHook("全部钩子"); }}>清空</button>
+    </div>
+    <div className="library-result-line"><strong>显示 {visible.length} / {records.length} 条素材</strong><span>字段直接来自飞书；播放、类目、钩子未填写时不做估算。</span></div>
+    {visible.length ? <div className="viral-library-grid">{visible.map(item => <article className="viral-material-card" key={item.id}>
+      <div className="material-card-top"><span className={item.platform === "TikTok" ? "platform-tag tiktok" : "platform-tag douyin"}>{item.platform}</span><span className="material-id">{item.id.replace("VV-", "")}</span></div>
+      <h3 title={item.title}>{item.title}</h3><p className="material-author">@{item.author.replace(/^@/, "")}</p>
+      <div className="material-tags"><i>{item.category || "待分类"}</i><i>{item.hookType || "待识别"}</i></div>
+      <div className="material-hook"><small>主钩子 / 前 3 秒</small><p>{item.sourceHook || item.hook || "待补齐"}</p></div>
+      <dl className="material-metrics"><div><dt>播放</dt><dd>{format(item.views)}</dd></div><div><dt>点赞</dt><dd>{format(item.likes)}</dd></div><div><dt>分享</dt><dd>{format(item.shares)}</dd></div></dl>
+      <footer><a href={item.link} target="_blank" rel="noreferrer">打开原视频 ↗</a><button onClick={() => onPreview(item)}>预览原片</button><button className="material-primary" onClick={() => { onChoose(item.id); setNotice(`已将 ${item.id.replace("VV-", "")} 带入采集与拆解`); }}>进入拆解</button></footer>
+    </article>)}</div> : <div className="library-empty"><strong>没有匹配的素材</strong><span>尝试清空筛选，或回飞书补齐类目和钩子字段。</span></div>}
+    {notice && <div className="library-toast" role="status">{notice}</div>}
+  </section>;
+}
+
 function RealVideoFactory({ stage, onStage, view, onView }: { stage: VideoStageKey; onStage: (stage: VideoStageKey) => void; view: string; onView: (view: string) => void }) {
   const meta = videoStageMeta[stage];
   const legacyProject = contentProjects[0];
@@ -1237,7 +1283,7 @@ function RealVideoFactory({ stage, onStage, view, onView }: { stage: VideoStageK
     return matchesFilter && (!query || `${item.title} ${item.author} ${item.id}`.toLocaleLowerCase().includes(query));
   });
   const formatCount = (value: number) => value >= 10000 ? `${(value / 10000).toFixed(1)}万` : value.toLocaleString("zh-CN");
-  const nextStage = String(Math.min(6, Number(stage) + 1)).padStart(2, "0") as VideoStageKey;
+  const nextStage = String(Math.min(7, Number(stage) + 1)).padStart(2, "0") as VideoStageKey;
   const productionTabs = [["image-prompt","画面提示词"],["reference","参考图"],["video-prompt","视频提示词"],["ai-video","AI 视频创作"],["publish","发布"]];
   const productionProjectGroups = [
     { label:"创作准备",items:productionTabs.slice(0,3) },
@@ -1678,6 +1724,15 @@ function RealVideoFactory({ stage, onStage, view, onView }: { stage: VideoStageK
       <section className="panel video-pool-panel"><div className="panel-heading pool-heading"><div><p className="eyebrow">飞书 · 内容选题库</p><h3>视频爆款池</h3><p>桌面端每行展示 6 条统一尺寸的视频，数据直接叠加在画面上；全部结果连续排列，不再分页。</p></div><span className={poolSyncState === "live" ? "approved-pill" : "waiting-pill"}>{poolSyncState === "live" ? "飞书实时数据" : "飞书数据快照"}</span></div><div className="pool-toolbar"><div className="pool-filters">{[["all",`全部 ${poolRecords.length}`],["TikTok",`TikTok ${poolRecords.filter(item=>item.platform==="TikTok").length}`],["抖音",`抖音 ${poolRecords.filter(item=>item.platform==="抖音").length}`],["ready",`V1 已拆解 ${poolRecords.filter(item=>item.analysis==="V1 已拆解").length}`]].map(([key,label])=><button className={poolFilter===key?"active":""} key={key} onClick={()=>setPoolFilter(key)}>{label}</button>)}</div><input aria-label="搜索爆款池" value={poolSearch} onChange={event=>setPoolSearch(event.target.value)} placeholder="搜索标题、作者或视频 ID" /></div><div className="video-pool-grid">{visiblePoolRecords.map(item=><article className={selectedPoolId===item.id?"video-pool-card selected":"video-pool-card"} key={item.id}><div className={`embedded-video ${item.platform === "抖音" ? "douyin-player" : "tiktok-player"}`}><iframe src={item.embedUrl} title={`${item.platform} · ${item.title}`} loading="lazy" allow="autoplay; fullscreen" scrolling="no"/><div className="pool-video-badges"><span className={`platform-tag ${item.platform === "TikTok" ? "tiktok" : "douyin"}`}>{item.platform}</span><span>{item.analysis}</span></div>{item.platform === "抖音"&&<button className="pool-preview-play" aria-label={`居中播放 ${item.title}`} onClick={()=>setPoolPreviewRecord(item)}>▶</button>}<div className="pool-video-metrics"><span>♥ {formatCount(item.likes)}</span><span>▶ {item.views === null ? "待授权" : formatCount(item.views)}</span><span>↗ {formatCount(item.shares)}</span></div></div><div className="video-card-body"><div className="video-card-label"><span className={`platform-tag ${item.platform === "TikTok" ? "tiktok" : "douyin"}`}>{item.platform}</span><span className={item.analysis === "V1 已拆解" ? "approved-pill" : "waiting-pill"}>{item.analysis}</span></div><h3 title={item.title}>{item.title}</h3><p>{item.author} · {item.id.replace("VV-","")}</p><div className="primary-video-metrics"><span><small>点赞</small><strong>{formatCount(item.likes)}</strong></span><span className={item.views === null ? "metric-unavailable" : ""} title={item.views === null ? "数据源尚未提供播放量" : "来自已同步数据源"}><small>播放</small><strong>{item.views === null ? "待授权" : formatCount(item.views)}</strong></span><span><small>转发</small><strong>{formatCount(item.shares)}</strong></span></div><div className="secondary-video-metrics"><span>评论 {formatCount(item.comments)}</span><span>收藏 {formatCount(item.favorites)}</span></div><div className="video-card-actions"><a href={item.link} target="_blank" rel="noreferrer">原视频 ↗</a><button onClick={()=>choosePoolRecord(item.id)}>选为候选</button></div></div></article>)}</div>{visiblePoolRecords.length===0&&<div className="pool-empty">没有符合当前筛选条件的视频</div>}<p className="pool-method-note">数据口径：数值直接使用飞书表格返回结果；表格没有提供的字段显示“待授权”，系统不做估算。点击“同步飞书”可立即重新读取。</p>{poolPreviewRecord&&<div className="pool-player-overlay" role="dialog" aria-modal="true" aria-label={`播放 ${poolPreviewRecord.title}`} onClick={()=>setPoolPreviewRecord(null)}><div className="pool-player-dialog" onClick={event=>event.stopPropagation()}><header><div><span>{poolPreviewRecord.platform}</span><strong>{poolPreviewRecord.title}</strong></div><button aria-label="关闭播放器" onClick={()=>setPoolPreviewRecord(null)}>×</button></header><div className="pool-player-stage"><iframe src={poolPreviewRecord.embedUrl} title={`居中播放 · ${poolPreviewRecord.title}`} allow="autoplay; fullscreen" scrolling="no"/></div><footer><span>点赞 {formatCount(poolPreviewRecord.likes)}</span><span>播放 {poolPreviewRecord.views===null?"待授权":formatCount(poolPreviewRecord.views)}</span><span>转发 {formatCount(poolPreviewRecord.shares)}</span><button onClick={()=>{setPoolPreviewRecord(null);choosePoolRecord(poolPreviewRecord.id);}}>选为拆解候选</button></footer></div></div>}</section>
       <section className="panel data-health"><div><p className="eyebrow">数据健康检查</p><h3>视频可看，三项核心指标分开标注</h3></div><div><span><b>25</b> 条视频播放器</span><span><b>25</b> 条点赞数据</span><span><b>5</b> 条播放量已验证</span><span><b>25</b> 条转发数据</span></div></section></>}
 
+    {stage === "07" && <>
+      <ViralMaterialLibrary records={poolRecords} syncState={poolSyncState} syncedAt={poolUpdatedAt} onRefresh={refreshViralPool} onPreview={setPoolPreviewRecord} onChoose={choosePoolRecord} />
+      {poolPreviewRecord && <div className="pool-player-overlay" role="dialog" aria-modal="true" aria-label={`播放 ${poolPreviewRecord.title}`} onClick={() => setPoolPreviewRecord(null)}>
+        <div className="pool-player-dialog" onClick={event => event.stopPropagation()}><header><div><span>{poolPreviewRecord.platform}</span><strong>{poolPreviewRecord.title}</strong></div><button aria-label="关闭播放器" onClick={() => setPoolPreviewRecord(null)}>×</button></header>
+          <div className="pool-player-stage"><iframe src={poolPreviewRecord.embedUrl} title={`原片预览 · ${poolPreviewRecord.title}`} allow="autoplay; fullscreen" scrolling="no" /></div>
+          <footer><span>点赞 {formatCount(poolPreviewRecord.likes)}</span><span>播放 {poolPreviewRecord.views === null ? "待补齐" : formatCount(poolPreviewRecord.views)}</span><button onClick={() => { setPoolPreviewRecord(null); choosePoolRecord(poolPreviewRecord.id); }}>进入拆解</button></footer>
+        </div>
+      </div>}
+    </>}
     {stage === "02" && (selectedPoolRecord ? <div className="analysis-workbench">
       <aside className="panel analysis-video-panel"><div className="analysis-player">{analysisPreviewIsDirectVideo?<video src={analysisPreviewUrl} controls><track kind="captions" /></video>:analysisPreviewCanEmbed?<iframe src={analysisPreviewUrl} title={`待拆解视频 · ${selectedPoolRecord.title}`} allow="autoplay; fullscreen" />:<div className="analysis-preview-unavailable blocked-preview"><span>无法内嵌</span><h4>平台限制站内播放</h4><p>原视频页面禁止被第三方网页嵌入。拆解结果不受影响，可打开原视频核对，或重新上传视频恢复站内播放。</p>{selectedPoolRecord.link&&<a href={selectedPoolRecord.link} target="_blank" rel="noreferrer">打开原视频 ↗</a>}</div>}</div><div className="analysis-video-copy"><span className={`platform-tag ${selectedPoolRecord.platform === "TikTok" ? "tiktok" : "douyin"}`}>{selectedPoolRecord.platform}</span><h3>{selectedPoolRecord.title}</h3><p>{selectedPoolRecord.author}</p>{selectedPoolRecord.localPreview?<div className="local-video-ready"><span>本地视频已就绪</span><b>开始任务后自动上传</b></div>:<div><span>点赞 <b>{formatCount(selectedPoolRecord.likes)}</b></span><span>播放 <b>{selectedPoolRecord.views === null ? "待授权" : formatCount(selectedPoolRecord.views)}</b></span><span>转发 <b>{formatCount(selectedPoolRecord.shares)}</b></span></div>}{selectedPoolRecord.link&&<a href={selectedPoolRecord.link} target="_blank" rel="noreferrer">打开原视频 ↗</a>}<label className="replace-analysis-video"><input type="file" accept="video/mp4,video/quicktime,video/webm,.mkv" onChange={event=>{const file=event.target.files?.[0];if(file)chooseCustomVideo(file);event.currentTarget.value="";}}/><span>＋ 换成本地视频</span></label></div></aside>
       <main className="panel analysis-config"><div className="panel-heading"><div><p className="eyebrow">分析任务设置</p><h3>这条视频要怎样处理？</h3></div><div className="agent-bridge-status"><i className={bridgeState}/><span>{bridgeState === "ready" ? "本机 Codex 已连接" : bridgeState === "offline" ? "本机服务未连接" : "正在检测 Codex"}</span></div></div><div className="analysis-mode-grid"><button disabled={!!analysisJob && !["completed","failed","needs_upload"].includes(analysisJob.status)} className={analysisMode === "copy" ? "active" : ""} onClick={()=>changeAnalysisMode("copy")}><span className="analysis-mode-icon">文</span><div><small>按钮动作：开始分析</small><h3>文案与表达分析</h3><p>提取视频原文案和口播脚本，拆解内容表达结构，并生成保留原逻辑的口播改写稿。</p><div><i>不调用爆款拆解技能</i><i>原文案提取</i><i>口播改写</i></div></div></button><button disabled={!!analysisJob && !["completed","failed","needs_upload"].includes(analysisJob.status)} className={analysisMode === "viral" ? "active" : ""} onClick={()=>changeAnalysisMode("viral")}><span className="analysis-mode-icon">V1</span><div><small>按钮动作：开始拆解</small><h3>AI 带货爆款拆解</h3><p>调用 content-video-replication-strategist，按真实镜头执行 V1 原脚本还原与结构拆解。</p><div><i>必须调用指定技能</i><i>黄金3秒</i><i>1:1骨架</i></div></div></button></div>

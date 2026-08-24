@@ -43,6 +43,8 @@ function normalize(record: FeishuRecord) {
   const embedUrl = /tiktok/i.test(platform)
     ? `https://www.tiktok.com/player/v1/${id}?autoplay=0&controls=1&description=0&music_info=0`
     : `https://open.douyin.com/player/video?vid=${id}&autoplay=0`;
+  const hookType = plain(field(fields, ["钩子类型", "主钩子类型"])) || "待识别";
+  const sourceHook = plain(field(fields, ["前3秒钩子", "主钩子", "营销钩子"])) || "待补齐";
   return {
     id: `VV-${id}`,
     platform,
@@ -53,7 +55,11 @@ function normalize(record: FeishuRecord) {
     comments: numberField(fields, ["评论数", "评论"]),
     favorites: numberField(fields, ["收藏数", "收藏"]),
     shares: numberField(fields, ["转发数", "分享数", "转发", "分享"]),
-    status: "已同步", analysis: "等待 V1", score: null, hook: "待分析", hookType: "待识别", link, embedUrl,
+    status: "已同步", analysis: "等待 V1", score: null, hook: sourceHook, hookType, link, embedUrl,
+    category: plain(field(fields, ["类目", "内容类目", "分类"])) || "待分类",
+    sourceGroup: plain(field(fields, ["来源群聊", "来源记录"])) || "飞书人工发现",
+    sourceStatus: plain(field(fields, ["状态"])) || "已映射",
+    sourceHook,
   };
 }
 
